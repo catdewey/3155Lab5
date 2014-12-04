@@ -1,3 +1,12 @@
+
+
+
+
+
+
+
+
+
 object Lab5 extends jsy.util.JsyApplication {
   import jsy.lab5.ast._
   import jsy.lab5._
@@ -46,44 +55,43 @@ object Lab5 extends jsy.util.JsyApplication {
   
   //left should be from lab 4, right will just deal with mode
   
+  
+  
   def mapFirstWith[W,A](f: A => Option[DoWith[W,A]])(l: List[A]): DoWith[W,List[A]] = l match {
     case Nil => doreturn(l) //from ast.scala returns a map; the list that came in
     case h :: t => f(h) match {
-      case None => mapFirstWith(f)(t).map((modList:List[A]) => (h :: modList))
-      case Some(withhp) => withhp.map((newValueToBeMapped:A) => newValueToBeMapped::t)
+      case None => mapFirstWith(f)(t).map((a:List[A]) => (h::a))//modList
+      case Some(withhp) => withhp.map((a:A) => (a::t))//newValueToBeMapped = a
     }
   }
 
   /*** Casting ***/
   //casts noType to someType, but must cast someType to same someType, not noType
-  def castOk(t1: Typ, t2: Typ): Boolean = (t1, t2) match {
+    def castOk(t1: Typ, t2: Typ): Boolean = (t1, t2) match {
+    /*
+     * can cast nothing to something
+     * but something must be cast to something of the same type (not nothing)
+     */
     case (TNull, TObj(_)) => true
     case (_, _) if (t1 == t2) => true
     case (TObj(fields1), TObj(fields2)) => {
-	      //all of fields1(smaller object) must be in fields2(larger) but not vica versa ??? 
-	      //if so we need a test case to determine which is smaller, and then use that as the recursive one
-	    	
-	      //castOkObjectUP 
-	      //Iterate through field2. look for each in field1, if all in other, ret True else False
-	      val check1 = fields2 forall {
-		        case (tempField, tempTyp) => fields1.get(tempField) match {
-			          case Some(tempTyp2) => if (tempTyp == tempTyp2) true else false
-			          case None => true
-		        }
-	      }
-	      
-	      //castOkObjectDOWN
-	      val check2 = fields1 forall {
-	      //Iterate through field1. look for each in field2, if all in other, ret True else False
-		        case (tempField, tempTyp) => fields2.get(tempField) match {
-			          case Some(tempTyp2) => if (tempTyp == tempTyp2) true else false
-			          case None => true
-		        }
-	      }
-	
-	      (check1 || check2)
-	}
-  
+      
+      val DOWNarrow = fields1.forall{ 
+      //all of fields1 must be in fields2 and vice versa
+      case(n, v) => fields2.get(n) match{
+        case None => true
+        case Some(otherT) => if (otherT == v) true else false
+        }
+      }
+      val UParrow = fields2.forall{ //UP arrow
+        case(n, v) => fields1.get(n) match{
+          case None => true
+          case Some(otherT) => if (otherT == v) true else false
+        }
+      }
+      DOWNarrow && UParrow
+      
+    }
     case (TInterface(tvar, t1p), _) => castOk(typSubstitute(t1p, t1, tvar), t2)
     case (_, TInterface(tvar, t2p)) => castOk(t1, typSubstitute(t2p, t2, tvar))
     case _ => false
@@ -182,7 +190,62 @@ object Lab5 extends jsy.util.JsyApplication {
 		        case TObj(tfields) if (tfields.contains(f)) => tfields(f)
 		        case tgot => err(tgot, e1)
 		      } 
+
 	      
+	      
+	            
+      case Function(p, paramse, tann, e1) => {
+        /* FUNCTION NAME */
+        // Bind to env1 an environment that extends env with an appropriate binding if
+        // the function is potentially recursive.
+        val env1 = (p, tann) match {
+          case (Some(f), Some(rt)) => //we have some function name and some return type
+            val tprime = TFunction(paramse, rt) //we have a function with a set of parameters and a return type
+            env + (f -> (MConst, tprime))		//bind function name to function type in environment
+          case (None, _) => env					//if there is no function name, leave the environment alone
+          case _ => err(TUndefined, e1)			//it was neither Some nor None
+        }
+        /* PARAMETERS */
+        // Bind to env2 an environment that extends env1 with the parameters.
+        // parameters are either a list of parameters[(String, Type)] or (PMode, String, Type)
+        val env2 = paramse match {
+          // some number of parameters; immutable and pass-by-value; equivalent to prior labs
+          // Left means left of Either
+          case Left(params) => params.foldLeft(env1){
+            case(envp, parp) => parp match{
+              case(strp, typep) => envp + (strp -> (MConst, typep)) //for each parameter, bind string to type and accumulate in environment
+            }
+            //final envp value will be returned to env2 value
+          }
+          
+          
+          // one parameter where mode = var, name, or ref
+          // Right means right of Either
+          case Right((mode,x,t)) => 
+            mode match{
+            //bind x to the type in proper mode
+              case _ => env1 + (x ->(mut(mode), t) ) //helper function mut
+              /*
+            case PName => env1 + (x -> (MConst, t)) //pass by name, immutable
+            case PVar => env1 + (x -> (MVar, t)) //pass by value (mutable)
+            case PRef => env1 + (x -> (MVar, t)) //pass by reference
+           */
+            //case _ => err(TUndefined, e1)
+          }
+        }
+        /* FUNCTION BODY */
+        // Infer the type of the function body
+        val t1 = typeInfer(env2, e1)
+        tann foreach { rt => if (rt != t1) err(t1, e1) };
+        TFunction(paramse, t1)
+      }
+
+      
+
+	      
+	      
+	      
+	   /*         There is some error here, that makes me fail 4 tests.
 		  case Function(p, paramse, tann, e1) => {
 		        // Bind to env1 an environment that extends env with an appropriate binding if
 		        // the function is potentially recursive.
@@ -197,29 +260,57 @@ object Lab5 extends jsy.util.JsyApplication {
 		        // Bind to env2 an environment that extends env1 with the parameters.
 		        val env2 = paramse match {
 		          //case Left(params) => params.foldLeft(env1)(())
-		          case Left(params) => params.foldLeft(env1)((x, y) => y match{
-		            case (string, tp) => x + (string -> (MConst, tp))
-		          })
+		        case Left(params) => params.foldLeft(env1){
+			            case(envp, parp) => parp match{
+			            	case(strp, typep) => envp + (strp -> (MConst, typep)) //for each parameter, bind string to type and accumulate in environment
+			            }
+			            //final envp value will be returned to env2 value
+		        }
 		         
 		          //same but when extend enviromnemt, need to take care of mut thing, x is accumulator
-		          case Right((mode, x, t)) => env1 + (x-> (mode, t))//take care of mode part
+		        case Right((mode, x, t)) => mode match{ 
+		          case _ => env1 + (x-> (mut(mode), t))
+		          }//take care of mode part
 		        }
 		        // Infer the type of the function body
 		        val t1 = typeInfer(env1, e1) //?? env2 vs env1
 		        tann foreach { rt => if (rt != t1) err(t1, e1) };
 		        TFunction(paramse, t1)
-	      }
+	      }*/
 	      
 	      case Call(e1, args) => typ(e1) match {
 	        case TFunction(Left(params), tret) if (params.length == args.length) => {
 	          (params, args).zipped.foreach {
 	            (paramX, argsY) => (paramX, argsY) match {      // where params is itself a tuple, same as lab 4
-	            	case ((stg, paramType), argType) => if (paramType != typ(argType)) err(paramType, argType)
+	            	//case ((stg, paramType), argType) => if (paramType != typ(argType)) err(paramType, argType)
+	              case ((str, tp), ta) => if (tp != typ(ta)) err(tp, ta)
 	            }
 	          }
 	          tret
 	        }
-	        case tgot @ TFunction(Right((mode,_,tparam)), tret) => mode match{
+	        case tgot @ TFunction(Right((mode,_,tparam)), tret)if (args.length == 1) =>
+	          {
+		          //single parameter, has a mode, string, type
+		          //if the list is not 1item::Nil, we have a problem
+		          val typearg = typ(args(0)) //only one argument
+		          mode match{
+		            case PRef => {
+		              //TypeCallRef; reference is pointing to a location
+		              //must have a location expression or raise an error
+		              //use helper function isLExpr
+		              if ( isLExpr(args(0)) ) {
+		                if (typearg == tparam) tret else err(typearg, args(0))
+		              }
+		              else err(typearg, args(0))
+		            }
+		            	
+		            case _ => if (typearg == tparam) tret else err(typearg, args(0))//not ref
+		            //just have to have the same type
+		          }
+		          
+	          }
+
+	          /*mode match{
 	          case PRef => args match { // here mode is a ref
 		          case h::Nil => if (typ(h) == tparam && isLExpr(h)) tret else err(tgot, e1)
 		          case _ => err(tgot, e1)
@@ -229,13 +320,14 @@ object Lab5 extends jsy.util.JsyApplication {
 		          case _ => err(tgot, e1)
 		          }  
 	          
-	        }
+	        }*/
+	          
 	        case tgot => err(tgot, e1)
 	      }
 	      
 	      /*** Fill-in more cases here. ***/
-	      case Decl(mut, x, e1, e2) => typeInfer(env + (x -> (mut, typ(e1))), e2)
-		 
+	      case Decl(mut, x, e1, e2) =>{ typeInfer((env + (x -> (mut, typ(e1)))), e2) }
+		  
 	      //e1 can be a var, a field with a var and a field, or an error
 	      case Assign(e1, e2) => 
 		       val typeOfe2 = typ(e2)       
@@ -248,15 +340,16 @@ object Lab5 extends jsy.util.JsyApplication {
 		           val typeOfFieldOfe1 = typ(GetField(Var(x),f))
 		           if (typeOfFieldOfe1 == typeOfe2) typeOfFieldOfe1
 		           else err(typeOfe2, e2)
-		         case _ => throw new IllegalArgumentException("expression format wrong; too many args in e1");
-		  }
+		         case _ => err(typ(e1), e1)
+	      }
 	     
 	      case Unary(Cast(tau), e1) => (castOk(typ(e1), tau)) match{
 		        case true => tau;
 		        case false => err(typ(e1), e1);
 		  }
+      
 		 //case Null => TNull up with the other things.    
-	
+
 	        
 	      /* Should not match: non-source expressions or should have been removed */
 	      case A(_) | Unary(Deref, _) | InterfaceDecl(_, _, _) => throw new IllegalArgumentException("Gremlins: Encountered unexpected expression %s.".format(e))
@@ -291,7 +384,7 @@ object Lab5 extends jsy.util.JsyApplication {
 	    def subst(e: Expr): Expr = substitute(e, esub, x)
 	    // have to call avoid capture function to be with the free variables
 	    // Now because we have pass by name, need to 
-	    val ep: Expr = avoidCapture(freeVars(e), e)
+	    val ep: Expr = avoidCapture(freeVars(esub), e)
 	    ep match {
 		      case N(_) | B(_) | Undefined | S(_) | Null | A(_) => e
 		      case Print(e1) => Print(subst(e1))
@@ -300,8 +393,22 @@ object Lab5 extends jsy.util.JsyApplication {
 		      case If(e1, e2, e3) => If(subst(e1), subst(e2), subst(e3))
 		      case Var(y) => if (x == y) esub else e
 		      case Decl(mut, y, e1, e2) => Decl(mut, y, subst(e1), if (x == y) e2 else subst(e2))
-		      case Function(p, paramse, retty, e1) =>
-		        throw new UnsupportedOperationException
+		      case Function(p, paramse, retty, e1) =>{
+		    	  paramse match{
+			    	  	case Left(params) => {
+			    	  		//same as lab 4
+			    	  		if (params.exists((t1:(String,Typ))=> t1._1 == x) || p==Some(x)){
+			    	  		  //._1 get first element of tuple
+			    	  		  Function(p, paramse, retty,e1)
+			    	  		}else Function(p, paramse, retty, subst(e1))
+			    	  	}
+			    	  	case Right((mode,fnam,ftype)) => {
+			    	  	    //if it doesn't have a name, substitute
+			    	  		val newbody = if (fnam != x && p != Some(x)) substitute(e1, esub, x) else e1
+			    	  		Function(p, paramse, retty, newbody)
+			    	  	}
+		    	  }
+		      }
 		      case Call(e1, args) => Call(subst(e1), args map subst)
 		      case Obj(fields) => Obj(fields map { case (fi,ei) => (fi, subst(ei)) })
 		      case GetField(e1, f) => GetField(subst(e1), f)
