@@ -277,6 +277,8 @@ object Lab5 extends jsy.util.JsyApplication {
 		        tann foreach { rt => if (rt != t1) err(t1, e1) };
 		        TFunction(paramse, t1)
 	      }*/
+      
+      
 	      
 	      case Call(e1, args) => typ(e1) match {
 	        case TFunction(Left(params), tret) if (params.length == args.length) => {
@@ -289,28 +291,7 @@ object Lab5 extends jsy.util.JsyApplication {
 	          tret
 	        }
 	        case tgot @ TFunction(Right((mode,_,tparam)), tret)if (args.length == 1) =>
-	          {
-		          //single parameter, has a mode, string, type
-		          //if the list is not 1item::Nil, we have a problem
-		          val typearg = typ(args(0)) //only one argument
-		          mode match{
-		            case PRef => {
-		              //TypeCallRef; reference is pointing to a location
-		              //must have a location expression or raise an error
-		              //use helper function isLExpr
-		              if ( isLExpr(args(0)) ) {
-		                if (typearg == tparam) tret else err(typearg, args(0))
-		              }
-		              else err(typearg, args(0))
-		            }
-		            	
-		            case _ => if (typearg == tparam) tret else err(typearg, args(0))//not ref
-		            //just have to have the same type
-		          }
-		          
-	          }
-
-	          /*mode match{
+	          mode match{
 	          case PRef => args match { // here mode is a ref
 		          case h::Nil => if (typ(h) == tparam && isLExpr(h)) tret else err(tgot, e1)
 		          case _ => err(tgot, e1)
@@ -320,7 +301,7 @@ object Lab5 extends jsy.util.JsyApplication {
 		          case _ => err(tgot, e1)
 		          }  
 	          
-	        }*/
+	        }
 	          
 	        case tgot => err(tgot, e1)
 	      }
@@ -450,8 +431,14 @@ object Lab5 extends jsy.util.JsyApplication {
 	      case Binary(Times, N(n1), N(n2)) => doreturn( N(n1 * n2) )
 	      case Binary(Div, N(n1), N(n2)) => doreturn( N(n1 / n2) )
 	      case If(B(b1), e2, e3) => doreturn( if (b1) e2 else e3 )
+	      
 	      case Obj(fields) if (fields forall { case (_, vi) => isValue(vi)}) =>
-	        throw new UnsupportedOperationException
+	      //	val a = A.fresh()
+	      //	(m + (a -> e), a)
+	      // mem.alloc(expression)
+	        Mem.alloc(e) map { (a: A) => a: Expr }
+	      //throw new UnsupportedOperationException
+	      
 	      case GetField(a @ A(_), f) =>
 	        throw new UnsupportedOperationException
 	        
@@ -466,8 +453,11 @@ object Lab5 extends jsy.util.JsyApplication {
 	        } 
 	      
 	      case Decl(MConst, x, v1, e2) if isValue(v1) =>
+	        //extending e2 with v1 substituted x, mem unchanged DoConst
 	        throw new UnsupportedOperationException
+	        
 	      case Decl(MVar, x, v1, e2) if isValue(v1) =>
+	        //DoVar extending e2 with deref pointer a substituted for x
 	        throw new UnsupportedOperationException
 	
 	      case Assign(Unary(Deref, a @ A(_)), v) if isValue(v) =>
@@ -491,13 +481,29 @@ object Lab5 extends jsy.util.JsyApplication {
 	        for (e1p <- step(e1)) yield If(e1p, e2, e3)
 	      case Obj(fields) => fields find { case (_, ei) => !isValue(ei) } match {
 	        case Some((fi,ei)) =>
-	          throw new UnsupportedOperationException
+	          //get a new expression stepping on ei, yields an object with fields +fi bound to eiprime
+	          for (eip <- step(ei)) yield Obj(fields + (fi -> ei))
 	        case None => throw StuckError(e)
 	      }
-	      case GetField(e1, f) => throw new UnsupportedOperationException
 	      
+	      case GetField(e1, f) => 
+	        if(e1 == Null) throw new NullDereferenceError(e1)
+	        for (e1p <- step(e1)) yield GetField(e1p, f);
+
 	      /*** Fill-in more Search cases here. ***/
-	
+	      case Decl(mut, y, e1, e2) => 
+	        for (e1p <- step(e1)) yield Decl(mut, y, e1p, e2)
+	        
+	      case Call(e1, args) => e1 match {  
+	        case Function(_,_,_,_) => for (argp <- mapFirstWith(stepIfNotValue)(args)) yield Call(e1, argp)  
+	        case _ => for (e1p <- step(e1)) yield Call(e1p, args)
+	      }
+	      
+	      case Assign(e1, e2) if (isValue(e1) && !isValue(e2)) =>
+	        for (e2p <- step(e2)) yield Assign(e1, e2p)
+	        
+	      case Assign(e1, e2) =>
+	        for (e1p <- step(e1)) yield Assign(e1p, e2)
 	      /* Everything else is a stuck error. */
 	      case _ => throw StuckError(e)
 	    }
