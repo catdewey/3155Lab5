@@ -6,7 +6,7 @@ object Lab5 extends jsy.util.JsyApplication {
    * CSCI 3155: Lab 5
    * Catherine dewerd
    * 
-   * Partner: <Michelle Soult>
+   * Partner: Michelle Soult
    * Collaborators: Erik Eakins, Olivia Abrant, Jessica Lynch
    */
 
@@ -41,7 +41,11 @@ object Lab5 extends jsy.util.JsyApplication {
    * type R with a input-output state of type W.
    * 
    * Aside: This is also known as the State monad.
+   * 
    */
+  
+  //left should be from lab 4, right will just deal with mode
+  
   def mapFirstWith[W,A](f: A => Option[DoWith[W,A]])(l: List[A]): DoWith[W,List[A]] = l match {
     case Nil => doreturn(l) //from ast.scala returns a map; the list that came in
     case h :: t => f(h) match {
@@ -55,15 +59,31 @@ object Lab5 extends jsy.util.JsyApplication {
   def castOk(t1: Typ, t2: Typ): Boolean = (t1, t2) match {
     case (TNull, TObj(_)) => true
     case (_, _) if (t1 == t2) => true
-    case (TObj(fields1), TObj(fields2)) => fields1.forall{
-      //all of fields1(smaller object) must be in fields2(larger) but not vica versa ??? 
-      //if so we need a test case to determine which is smaller, and then use that as the recursive one
-      case(name, typ) if (typ == None) => true
-      case(name, typ) => fields2.get(name) match{
-        case None => false
-        case Some(other) => castOk(typ, other) //make sure it's in fields1
-      }
-    }
+    case (TObj(fields1), TObj(fields2)) => {
+	      //all of fields1(smaller object) must be in fields2(larger) but not vica versa ??? 
+	      //if so we need a test case to determine which is smaller, and then use that as the recursive one
+	    	
+	      //castOkObjectUP 
+	      //Iterate through field2. look for each in field1, if all in other, ret True else False
+	      val check1 = fields2 forall {
+		        case (tempField, tempTyp) => fields1.get(tempField) match {
+			          case Some(tempTyp2) => if (tempTyp == tempTyp2) true else false
+			          case None => true
+		        }
+	      }
+	      
+	      //castOkObjectDOWN
+	      val check2 = fields1 forall {
+	      //Iterate through field1. look for each in field2, if all in other, ret True else False
+		        case (tempField, tempTyp) => fields2.get(tempField) match {
+			          case Some(tempTyp2) => if (tempTyp == tempTyp2) true else false
+			          case None => true
+		        }
+	      }
+	
+	      (check1 || check2)
+	}
+  
     case (TInterface(tvar, t1p), _) => castOk(typSubstitute(t1p, t1, tvar), t2)
     case (_, TInterface(tvar, t2p)) => castOk(t1, typSubstitute(t2p, t2, tvar))
     case _ => false
@@ -193,18 +213,28 @@ object Lab5 extends jsy.util.JsyApplication {
 	      case Call(e1, args) => typ(e1) match {
 	        case TFunction(Left(params), tret) if (params.length == args.length) => {
 	          (params, args).zipped.foreach {
-	            throw new UnsupportedOperationException
+	            (paramX, argsY) => (paramX, argsY) match {      // where params is itself a tuple, same as lab 4
+	            	case ((stg, paramType), argType) => if (paramType != typ(argType)) err(paramType, argType)
+	            }
 	          }
 	          tret
 	        }
-	        case tgot @ TFunction(Right((mode,_,tparam)), tret) =>
-	          throw new UnsupportedOperationException
+	        case tgot @ TFunction(Right((mode,_,tparam)), tret) => mode match{
+	          case PRef => args match { // here mode is a ref
+		          case h::Nil => if (typ(h) == tparam && isLExpr(h)) tret else err(tgot, e1)
+		          case _ => err(tgot, e1)
+	          }
+	          case _ => args match { // here mode is one of the other two
+		          case h::Nil => if (typ(h) == tparam) tret else err(tgot, e1)
+		          case _ => err(tgot, e1)
+		          }  
+	          
+	        }
 	        case tgot => err(tgot, e1)
 	      }
 	      
 	      /*** Fill-in more cases here. ***/
-	      case Decl(mut, x, e1, e2) => typeInfer(env + (x->(mut, typ(e1))),e2)
-	      
+	      case Decl(mut, x, e1, e2) => typeInfer(env + (x -> (mut, typ(e1))), e2)
 		 
 	      //e1 can be a var, a field with a var and a field, or an error
 	      case Assign(e1, e2) => 
@@ -225,7 +255,7 @@ object Lab5 extends jsy.util.JsyApplication {
 		        case true => tau;
 		        case false => err(typ(e1), e1);
 		  }
-		 //case Null() =>    
+		 //case Null => TNull up with the other things.    
 	
 	        
 	      /* Should not match: non-source expressions or should have been removed */
@@ -261,7 +291,7 @@ object Lab5 extends jsy.util.JsyApplication {
 	    def subst(e: Expr): Expr = substitute(e, esub, x)
 	    // have to call avoid capture function to be with the free variables
 	    // Now because we have pass by name, need to 
-	    val ep: Expr = throw new UnsupportedOperationException
+	    val ep: Expr = avoidCapture(freeVars(e), e)
 	    ep match {
 		      case N(_) | B(_) | Undefined | S(_) | Null | A(_) => e
 		      case Print(e1) => Print(subst(e1))
